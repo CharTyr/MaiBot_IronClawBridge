@@ -297,8 +297,9 @@ class SSHExecutor:
             f"mkdir -p {results_dir} && "
             f"echo '{escaped}' > {msg_file} && "
             f"nohup setsid bash -c '"
+            f"rm -f {env_source}; "
             f"if ! {refresh_env}; then echo __IRONCLAW_EXIT__=70 > {result_file}; exit 70; fi; "
-            f"source {env_source}; "
+            f"source {env_source}; rm -f {env_source}; "
             f"persistent_pid=\"$(pgrep -u agent -f \"^ironclaw run --no-onboard$\" | head -n 1)\"; "
             f"if [ -z \"$persistent_pid\" ]; then echo __IRONCLAW_EXIT__=71 > {result_file}; exit 71; fi; "
             f"cleanup() {{ status=$?; trap - EXIT; echo __IRONCLAW_EXIT__=$status >> {result_file}; echo \"$persistent_pid\" > /home/agent/.ironclaw/ironclaw.pid; rm -f {pid_file}; exit $status; }}; "
@@ -551,9 +552,15 @@ class IronClawBridgePlugin(MaiBotPlugin):
             )
 
         # 构造 IronClaw message
-        ic_message = task
+        ic_message = (
+            "你是 MaiBot 的受限远程异步执行器。"
+            f"所有文件工作只能在 {cfg.remote_workspace} 内进行；"
+            "不得读取或操作 SSH 密钥、环境凭据、系统配置、支付或生产服务。"
+            "不要直接联系群聊或外部用户；只返回任务产物与简洁结论。"
+            f"\n\n任务：\n{task}"
+        )
         if background:
-            ic_message = f"{task}\n\n背景信息：\n{background}"
+            ic_message += f"\n\n背景信息：\n{background}"
 
         # SSH 提交（async）
         try:

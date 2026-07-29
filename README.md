@@ -37,9 +37,9 @@ SSH 登录 shell 不继承 NEAR AI 容器启动时注入的 `NEARAI_API_KEY`、`
 
 1. 通过 `sudo` 找到常驻 `ironclaw run --no-onboard` 进程；
 2. 从其 root 父进程的 `/proc/<pid>/environ` 重新生成 `/home/agent/.ironclaw/runtime-env.sh`；
-3. 再启动本次 CLI 任务。
+3. 启动本次 CLI 任务后立即删除临时环境文件。
 
-`/home/agent` 是独立持久化挂载，因此容器重启后插件本身不需要额外部署或手工刷新。环境文件会在下一次任务派遣时自动重建。
+`/home/agent` 是独立持久化挂载，因此容器重启后插件本身不需要额外部署或手工刷新。环境文件会在下一次任务派遣时自动重建，且不会留在磁盘上供任务读取。
 
 ### 仅支持串行任务
 
@@ -50,6 +50,8 @@ SSH 登录 shell 不继承 NEAR AI 容器启动时注入的 `NEARAI_API_KEY`、`
 ### 自动批准
 
 默认 `auto_approve = true`，任务进程携带 `--auto-approve`。它自动批准常规 shell、文件和 HTTP 工具调用；IronClaw CLI 仍会保留其破坏性操作、认证、hooks 和限速保护。
+
+**不要给这个同 UID 的实例安装能读取宿主文件或环境的 shell/terminal tool。** 该进程为调用私有 NEAR 推理而携带运行凭据；若需要可执行代码，应该接入带独立 scoped credential 的 sandboxed worker，而不是给宿主 shell 开口子。
 
 ### 终止与超时
 
