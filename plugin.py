@@ -256,7 +256,7 @@ class SSHExecutor:
         env_source = "/home/agent/.ironclaw/runtime-env.sh"
         remote_script = (
             f"mkdir -p {results_dir} && "
-            f"printf '%s' '{escaped}' > {msg_file} && "
+            f"echo '{escaped}' > {msg_file} && "
             f"nohup bash -c '"
             f"source {env_source} 2>/dev/null; "
             f"rm -f /home/agent/.ironclaw/ironclaw.pid 2>/dev/null; "
