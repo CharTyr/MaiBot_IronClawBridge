@@ -51,7 +51,7 @@ SSH 登录 shell 不继承 NEAR AI 容器启动时注入的 `NEARAI_API_KEY`、`
 
 默认 `auto_approve = true`，任务进程携带 `--auto-approve`。它自动批准常规 shell、文件和 HTTP 工具调用；IronClaw CLI 仍会保留其破坏性操作、认证、hooks 和限速保护。
 
-**不要给这个同 UID 的实例安装能读取宿主文件或环境的 shell/terminal tool。** 该进程为调用私有 NEAR 推理而携带运行凭据；若需要可执行代码，应该接入带独立 scoped credential 的 sandboxed worker，而不是给宿主 shell 开口子。
+NEAR 主机本身是隔离执行环境，因此可以为 IronClaw 安装 shell/terminal tool，让它在 `/home/agent/workspace` 内执行代码与测试。当前 `0.29.1` 内嵌 registry 尚未提供该工具；这是能力缺口，不是 Bridge 的安全限制。
 
 ### 终止与超时
 
