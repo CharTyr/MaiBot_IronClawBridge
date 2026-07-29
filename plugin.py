@@ -255,7 +255,7 @@ class SSHExecutor:
             f"mkdir -p {results_dir} && "
             f"printf '%s' '{escaped}' > {msg_file} && "
             f"nohup sh -c '"
-            f"/usr/local/bin/ironclaw run --no-onboard --message \"$(cat {msg_file})\" "
+            f"/usr/local/bin/ironclaw run --no-onboard --cli-only --message \"$(cat {msg_file})\" "
             f"> {result_file} 2>&1; "
             f"echo \"EXIT=$?\" >> {result_file}"
             f"' > /dev/null 2>&1 & "
