@@ -51,7 +51,11 @@ SSH 登录 shell 不继承 NEAR AI 容器启动时注入的 `NEARAI_API_KEY`、`
 
 默认 `auto_approve = true`，任务进程携带 `--auto-approve`。它自动批准常规 shell、文件和 HTTP 工具调用；IronClaw CLI 仍会保留其破坏性操作、认证、hooks 和限速保护。
 
-NEAR 主机本身是隔离执行环境，因此可以为 IronClaw 安装 shell/terminal tool，让它在 `/home/agent/workspace` 内执行代码与测试。当前 `0.29.1` 内嵌 registry 尚未提供该工具；这是能力缺口，不是 Bridge 的安全限制。
+### 开发工具与 Shell
+
+IronClaw `0.29.1` 已在二进制内置 `shell`、`read_file`、`write_file`、`apply_patch`、`grep` 与 `glob`，但默认隐藏。Bridge 的 `enable_local_tools = true` 会对每次委派的 CLI 进程注入 `ALLOW_LOCAL_TOOLS=true`，使它们成为模型可调用工具。
+
+这些命令运行在 near 的隔离 Agent 容器内，而不是额外安装的 WASM registry tool。默认工作目录由任务提示固定为 `/home/agent/workspace`；ShellTool 仍保留命令超时、输出截断、环境变量清洗，以及对明显危险/凭据路径操作的内置拦截。
 
 ### 终止与超时
 
@@ -66,6 +70,8 @@ data/plugins/chartyr.ironclaw-bridge/config.toml
 ```
 
 源文件中的 `config.toml` 可作为初始模板。修改后由 MaiBot 插件配置热更新机制加载。
+
+`enable_local_tools = false` 可临时退回仅 LLM + MCP 的无 shell 模式。
 
 ## 安装
 
