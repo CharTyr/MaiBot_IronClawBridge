@@ -7,9 +7,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
-import os
 import sqlite3
 import time
 import uuid
@@ -46,7 +46,14 @@ class IronClawSectionConfig(PluginConfigBase):
     remote_workspace: str = Field(default="/home/agent/workspace", description="远端工作目录")
     remote_results_dir: str = Field(default="/home/agent/ironclaw-results", description="远端结果目录")
     task_timeout: int = Field(default=600, description="任务超时秒数")
-    max_concurrent: int = Field(default=3, description="最大并发任务")
+    max_concurrent: int = Field(
+        default=1,
+        description="当前版本必须为 1：远端 CLI 共用数据库、工作目录和 PID 锁",
+    )
+    auto_approve: bool = Field(
+        default=True,
+        description="自动批准 IronClaw 的标准工具调用；破坏性操作仍由 IronClaw 拦截",
+    )
     poll_interval: int = Field(default=15, description="轮询间隔秒")
     max_result_chars: int = Field(default=4000, description="结果截断长度")
     snapshot_chat_count: int = Field(default=8, description="快照保存群聊条数")
@@ -86,6 +93,40 @@ def _db_path() -> Path:
 def _esc_sq(text: str) -> str:
     """转义单引号，用于 SSH 命令中的 single-quoted 字符串。"""
     return text.replace("'", "'\"'\"'")
+
+
+_RUNTIME_ENV_REFRESH_SCRIPT = """#!/usr/bin/env bash
+set -euo pipefail
+
+agent_pid="$(pgrep -u agent -f '^ironclaw run --no-onboard$' | head -n 1)"
+if [ -z "${agent_pid}" ]; then
+    echo "persistent IronClaw process not found" >&2
+    exit 1
+fi
+
+root_parent_pid="$(ps -o ppid= -p "${agent_pid}" | tr -d ' ')"
+if [ -z "${root_parent_pid}" ]; then
+    echo "persistent IronClaw parent process not found" >&2
+    exit 1
+fi
+
+env_file=/home/agent/.ironclaw/runtime-env.sh
+tmp_file="${env_file}.tmp.$$"
+trap 'rm -f "${tmp_file}"' EXIT
+
+tr '\\0' '\\n' < "/proc/${root_parent_pid}/environ" | grep -E '^(NEARAI_API_KEY|NEARAI_API_URL|NEARAI_BASE_URL|NEARAI_MODEL|SECRETS_MASTER_KEY|LIBSQL_PATH|DATABASE_BACKEND|RUST_LOG|ENGINE_V2|SANDBOX_ENABLED|SANDBOX_IMAGE|SANDBOX_AUTO_PULL)=' > "${tmp_file}"
+grep -q '^NEARAI_API_KEY=' "${tmp_file}"
+grep -q '^SECRETS_MASTER_KEY=' "${tmp_file}"
+sed 's/^/export /' "${tmp_file}" > "${env_file}"
+chown agent:agent "${env_file}"
+chmod 600 "${env_file}"
+"""
+
+
+def _runtime_env_refresh_command() -> str:
+    """以 root 身份从常驻实例父进程刷新运行环境，不依赖固定 PID。"""
+    encoded = base64.b64encode(_RUNTIME_ENV_REFRESH_SCRIPT.encode("utf-8")).decode("ascii")
+    return f"echo {encoded} | base64 -d | sudo bash"
 
 
 # ── DB ───────────────────────────────────────────────────────────────────
@@ -243,27 +284,29 @@ class SSHExecutor:
 
     @staticmethod
     async def submit(cfg: IronClawSectionConfig, task_id: str, message: str) -> str:
-        """提交任务到远端：nohup ironclaw run → 结果文件。返回 remote hint。
-
-        环境变量来源：/home/agent/.ironclaw/runtime-env.sh（由部署脚本预生成，
-        从常驻 PID 578 的 /proc/.../environ 提取）。
-        SSH 新 session 不继承容器 init 的环境，必须显式 source。
-        """
+        """提交单个串行任务到远端，并返回 setsid 进程组 leader PID。"""
         results_dir = cfg.remote_results_dir
         result_file = f"{results_dir}/{task_id}.json"
+        pid_file = f"{results_dir}/{task_id}.pid"
         msg_file = f"/tmp/ic_msg_{task_id}.txt"
         escaped = _esc_sq(message)
         env_source = "/home/agent/.ironclaw/runtime-env.sh"
+        refresh_env = _runtime_env_refresh_command()
+        approval_flag = "--auto-approve" if cfg.auto_approve else ""
         remote_script = (
             f"mkdir -p {results_dir} && "
             f"echo '{escaped}' > {msg_file} && "
-            f"nohup bash -c '"
-            f"source {env_source} 2>/dev/null; "
-            f"rm -f /home/agent/.ironclaw/ironclaw.pid 2>/dev/null; "
-            f"/usr/local/bin/ironclaw run --no-onboard --cli-only --message \"$(cat {msg_file})\" "
-            f"> {result_file} 2>&1; "
-            f"echo \"EXIT=$?\" >> {result_file}; "
-            f"echo 578 > /home/agent/.ironclaw/ironclaw.pid 2>/dev/null"
+            f"nohup setsid bash -c '"
+            f"if ! {refresh_env}; then echo __IRONCLAW_EXIT__=70 > {result_file}; exit 70; fi; "
+            f"source {env_source}; "
+            f"persistent_pid=\"$(pgrep -u agent -f \"^ironclaw run --no-onboard$\" | head -n 1)\"; "
+            f"if [ -z \"$persistent_pid\" ]; then echo __IRONCLAW_EXIT__=71 > {result_file}; exit 71; fi; "
+            f"cleanup() {{ status=$?; trap - EXIT; echo __IRONCLAW_EXIT__=$status >> {result_file}; echo \"$persistent_pid\" > /home/agent/.ironclaw/ironclaw.pid; rm -f {pid_file}; exit $status; }}; "
+            f"trap cleanup EXIT; trap \"exit 143\" TERM INT HUP; "
+            f"echo \"$$\" > {pid_file}; "
+            f"rm -f /home/agent/.ironclaw/ironclaw.pid; "
+            f"/usr/local/bin/ironclaw run --no-onboard --cli-only {approval_flag} --message \"$(cat {msg_file})\" > {result_file} 2>&1 & "
+            f"worker_pid=$!; wait \"$worker_pid\""
             f"' > /dev/null 2>&1 & "
             f"echo $!"
         )
@@ -273,8 +316,12 @@ class SSHExecutor:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
-        return stdout.decode("utf-8", errors="replace").strip()
+        stdout, stderr = await proc.communicate()
+        remote_pid = stdout.decode("utf-8", errors="replace").strip()
+        if proc.returncode != 0 or not remote_pid.isdecimal():
+            detail = stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(detail or f"远端任务启动失败（exit={proc.returncode}）")
+        return remote_pid
 
     @staticmethod
     async def poll_result(cfg: IronClawSectionConfig, task_id: str) -> str | None:
@@ -294,10 +341,15 @@ class SSHExecutor:
 
     @staticmethod
     async def cancel_remote(cfg: IronClawSectionConfig, task_id: str) -> None:
-        """远端清理：删除结果文件和消息文件。"""
+        """终止 setsid 任务进程组；结果文件保留供审计。"""
         results_dir = cfg.remote_results_dir
+        pid_file = f"{results_dir}/{task_id}.pid"
         cmd = SSHExecutor._ssh_prefix(cfg) + [
-            f"rm -f {results_dir}/{task_id}.json /tmp/ic_msg_{task_id}.txt 2>/dev/null; echo done"
+            f"if [ -s {pid_file} ]; then "
+            f"pid=$(cat {pid_file}); "
+            f"case $pid in (*[!0-9]*|'') exit 2;; esac; "
+            f"kill -TERM -- -$pid 2>/dev/null || kill -TERM $pid 2>/dev/null || true; "
+            f"fi; rm -f /tmp/ic_msg_{task_id}.txt; echo done"
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -458,12 +510,18 @@ class IronClawBridgePlugin(MaiBotPlugin):
         cfg = self._cfg()
         stream_id, group_id = self._extract_stream_info(kwargs)
 
-        # 并发检查
+        # IronClaw v0.29.1 的 CLI 任务共用 DB、workspace 和 PID 锁；必须串行。
         active = self._db.get_active_tasks() if self._db else []
-        if len(active) >= cfg.max_concurrent:
+        concurrency_limit = 1
+        if cfg.max_concurrent != concurrency_limit:
+            logger.warning(
+                "[IronClawBridge] 忽略 max_concurrent=%s：当前远端实例仅支持串行任务",
+                cfg.max_concurrent,
+            )
+        if len(active) >= concurrency_limit:
             return (
                 False,
-                f"已有 {len(active)} 个任务在运行（上限 {cfg.max_concurrent}），请等其中一个完成后再提交",
+                "已有一个 IronClaw 任务在运行；当前远端实例只能串行执行，请等它完成后再提交",
                 0,
             )
 
@@ -499,7 +557,9 @@ class IronClawBridgePlugin(MaiBotPlugin):
 
         # SSH 提交（async）
         try:
-            await SSHExecutor.submit(cfg, task_id, ic_message)
+            remote_pid = await SSHExecutor.submit(cfg, task_id, ic_message)
+            if self._db:
+                self._db.update_task(task_id, remote_pid=remote_pid)
             logger.info(f"[IronClawBridge] 任务已提交: task_id={task_id} title={title}")
             return True, f"任务已提交（task_id={task_id}）。Agent 正在后台执行，完成后会自动反馈。", 1
         except Exception as exc:
@@ -626,10 +686,14 @@ class IronClawBridgePlugin(MaiBotPlugin):
 
         # 超时检查
         if int(time.time()) - created_at > cfg.task_timeout:
+            try:
+                await SSHExecutor.cancel_remote(cfg, task_id)
+            except Exception as exc:
+                logger.warning(f"[IronClawBridge] 超时任务终止失败 {task_id}: {exc}")
             self._db.update_task(
                 task_id,
                 status="timeout",
-                result="任务超时",
+                result="任务超时，已向远端进程发送终止信号",
                 completed_at=int(time.time()),
             )
             logger.info(f"[IronClawBridge] 任务超时: {task_id}")
@@ -648,11 +712,12 @@ class IronClawBridgePlugin(MaiBotPlugin):
         # 解析结果
         result_text = raw.strip()
         exit_code = ""
-        if "EXIT=" in result_text:
-            idx = result_text.rfind("EXIT=")
+        exit_marker = "__IRONCLAW_EXIT__="
+        if exit_marker in result_text:
+            idx = result_text.rfind(exit_marker)
             exit_line = result_text[idx:]
             result_text = result_text[:idx].strip()
-            exit_code = exit_line.replace("EXIT=", "").strip()
+            exit_code = exit_line.replace(exit_marker, "").strip()
 
         if not result_text:
             result_text = f"(Agent 返回空输出，exit={exit_code})"

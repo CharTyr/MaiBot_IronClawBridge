@@ -17,8 +17,11 @@ remote_results_dir = "/home/agent/ironclaw-results"
 # 任务超时（秒），默认 10 分钟
 task_timeout = 600
 
-# 最大并发任务数
-max_concurrent = 3
+# 当前 IronClaw CLI 共用 DB、工作目录和 PID 锁，必须串行
+max_concurrent = 1
+
+# 自动批准标准 shell/文件/HTTP 工具调用；IronClaw 的破坏性操作保护仍会生效
+auto_approve = true
 
 # 轮询间隔（秒）
 poll_interval = 15
