@@ -1,6 +1,6 @@
 [plugin]
 enabled = true
-config_version = "1.0.0"
+config_version = "1.1.0"
 
 [ironclaw]
 ssh_host = "baremetal3.agents.near.ai"
@@ -12,6 +12,7 @@ remote_results_dir = "/home/agent/ironclaw-results"
 task_timeout = 600
 max_concurrent = 1
 auto_approve = true
+enable_local_tools = true
 poll_interval = 15
 max_result_chars = 4000
 snapshot_chat_count = 8

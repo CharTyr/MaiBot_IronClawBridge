@@ -54,6 +54,10 @@ class IronClawSectionConfig(PluginConfigBase):
         default=True,
         description="自动批准 IronClaw 的标准工具调用；破坏性操作仍由 IronClaw 拦截",
     )
+    enable_local_tools: bool = Field(
+        default=True,
+        description="启用 IronClaw 内置 shell、读写文件和 patch 开发工具（在 near 隔离环境中执行）",
+    )
     poll_interval: int = Field(default=15, description="轮询间隔秒")
     max_result_chars: int = Field(default=4000, description="结果截断长度")
     snapshot_chat_count: int = Field(default=8, description="快照保存群聊条数")
@@ -293,6 +297,7 @@ class SSHExecutor:
         env_source = "/home/agent/.ironclaw/runtime-env.sh"
         refresh_env = _runtime_env_refresh_command()
         approval_flag = "--auto-approve" if cfg.auto_approve else ""
+        local_tools_env = "ALLOW_LOCAL_TOOLS=true " if cfg.enable_local_tools else ""
         remote_script = (
             f"mkdir -p {results_dir} && "
             f"echo '{escaped}' > {msg_file} && "
@@ -306,7 +311,7 @@ class SSHExecutor:
             f"trap cleanup EXIT; trap \"exit 143\" TERM INT HUP; "
             f"echo \"$$\" > {pid_file}; "
             f"rm -f /home/agent/.ironclaw/ironclaw.pid; "
-            f"/usr/local/bin/ironclaw run --no-onboard --cli-only {approval_flag} --message \"$(cat {msg_file})\" > {result_file} 2>&1 & "
+            f"{local_tools_env}/usr/local/bin/ironclaw run --no-onboard --cli-only {approval_flag} --message \"$(cat {msg_file})\" > {result_file} 2>&1 & "
             f"worker_pid=$!; wait \"$worker_pid\""
             f"' > /dev/null 2>&1 & "
             f"echo $!"

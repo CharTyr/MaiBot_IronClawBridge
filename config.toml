@@ -1,6 +1,6 @@
 [plugin]
 enabled = true
-config_version = "1.0.0"
+config_version = "1.1.0"
 
 [ironclaw]
 # SSH 连接
@@ -22,6 +22,9 @@ max_concurrent = 1
 
 # 自动批准标准 shell/文件/HTTP 工具调用；IronClaw 的破坏性操作保护仍会生效
 auto_approve = true
+
+# 启用 IronClaw 内置 shell、读写文件、patch 等开发工具（运行在 near 隔离环境）
+enable_local_tools = true
 
 # 轮询间隔（秒）
 poll_interval = 15
