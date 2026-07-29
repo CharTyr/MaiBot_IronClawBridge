@@ -243,21 +243,27 @@ class SSHExecutor:
 
     @staticmethod
     async def submit(cfg: IronClawSectionConfig, task_id: str, message: str) -> str:
-        """提交任务到远端：nohup ironclaw run → 结果文件。返回 remote hint。"""
+        """提交任务到远端：nohup ironclaw run → 结果文件。返回 remote hint。
+
+        环境变量来源：/home/agent/.ironclaw/runtime-env.sh（由部署脚本预生成，
+        从常驻 PID 578 的 /proc/.../environ 提取）。
+        SSH 新 session 不继承容器 init 的环境，必须显式 source。
+        """
         results_dir = cfg.remote_results_dir
         result_file = f"{results_dir}/{task_id}.json"
-        # 写任务 message 到临时文件，避免命令行长度和转义问题
         msg_file = f"/tmp/ic_msg_{task_id}.txt"
-        # 转义 message 内容写入远端文件
         escaped = _esc_sq(message)
-        # 一条 SSH：创建目录 + 写 message + nohup 启动
+        env_source = "/home/agent/.ironclaw/runtime-env.sh"
         remote_script = (
             f"mkdir -p {results_dir} && "
             f"printf '%s' '{escaped}' > {msg_file} && "
-            f"nohup sh -c '"
+            f"nohup bash -c '"
+            f"source {env_source} 2>/dev/null; "
+            f"rm -f /home/agent/.ironclaw/ironclaw.pid 2>/dev/null; "
             f"/usr/local/bin/ironclaw run --no-onboard --cli-only --message \"$(cat {msg_file})\" "
             f"> {result_file} 2>&1; "
-            f"echo \"EXIT=$?\" >> {result_file}"
+            f"echo \"EXIT=$?\" >> {result_file}; "
+            f"echo 578 > /home/agent/.ironclaw/ironclaw.pid 2>/dev/null"
             f"' > /dev/null 2>&1 & "
             f"echo $!"
         )
