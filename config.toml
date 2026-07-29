@@ -1,0 +1,30 @@
+[plugin]
+enabled = true
+config_version = "1.0.0"
+
+[ironclaw]
+# SSH 连接
+ssh_host = "baremetal3.agents.near.ai"
+ssh_port = 19536
+ssh_user = "agent"
+# SSH 密钥路径，空 = 用系统默认
+ssh_key = ""
+
+# 远端工作目录
+remote_workspace = "/home/agent/workspace"
+remote_results_dir = "/home/agent/ironclaw-results"
+
+# 任务超时（秒），默认 10 分钟
+task_timeout = 600
+
+# 最大并发任务数
+max_concurrent = 3
+
+# 轮询间隔（秒）
+poll_interval = 15
+
+# 结果截断长度（发给 Planner 的最大字符数）
+max_result_chars = 4000
+
+# 任务快照中保存的最近群聊消息条数
+snapshot_chat_count = 8
