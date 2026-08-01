@@ -464,10 +464,10 @@ class IronClawBridgePlugin(MaiBotPlugin):
             logger.warning(f"[IronClawBridge] 快照抓取失败: {exc}")
             return []
 
-    # ── Tool: delegate_to_agent ───────────────────────────────────────
+    # ── Tool: subagent ───────────────────────────────────────
 
     @Tool(
-        "delegate_to_agent",
+        "subagent",
         description=(
             "将任务委托给远程自主 Agent（IronClaw）异步执行。"
             "该 Agent 具备代码编写与运行、联网搜索、文件读写、多步推理能力。"
@@ -501,7 +501,7 @@ class IronClawBridgePlugin(MaiBotPlugin):
             ),
         ],
     )
-    async def handle_delegate_to_agent(
+    async def handle_subagent(
         self,
         title: str = "",
         task: str = "",
